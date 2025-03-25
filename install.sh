@@ -7,6 +7,23 @@ install_java() {
     [ "$JAVA_PKG" == "" ] || dnf install -y ${JAVA_PKG}
 }
 
+# Ensure the group exists
+ensure_group_exists() {
+    local group_name=$1
+    if ! getent group $group_name > /dev/null 2>&1; then
+        groupadd $group_name
+    fi
+}
+
+# Ensure the user exists
+ensure_user_exists() {
+    local user_name=$1
+    local group_name=$2
+    if ! id -u $user_name > /dev/null 2>&1; then
+        useradd -g $group_name $user_name
+    fi
+}
+
 install_elasticsearch_tar() {
     local version=${ELASTICSEARCH_VERSION:-7.17.16}
     local url=${ELASTICSEARCH_TAR}
@@ -16,8 +33,6 @@ install_elasticsearch_tar() {
     wget $url -O elasticsearch-$version.tar.gz
 
     echo "Installing Elasticsearch..."
-    [ -f $install_dir/bin/elasticsearch ] && return
-
     mkdir -p $install_dir
     tar -xzf elasticsearch-$version.tar.gz -C $install_dir --strip-components=1
 
@@ -25,7 +40,7 @@ install_elasticsearch_tar() {
 }
 
 install_elasticsearch_rpm() {
-    [ -x /usr/share/elasticsearch/bin/elasticsearch ] || rpm -Uvh ${ELASTICSEARCH_RPM}
+    rpm -Uvh ${ELASTICSEARCH_RPM}
 }
 
 install_elasticsearch() {
@@ -38,21 +53,16 @@ install_elasticsearch() {
 
 configure_elasticsearch() {
     if [[ "${ELASTICSEARCH_INSTALLATION_METHOD}" == "tar" ]]; then
-        local config_dir="${ELASTICSEARCH_INSTALL_DIR}/config"
         local config_file="${ELASTICSEARCH_INSTALL_DIR}/config/elasticsearch.yml"
     else
         local config_file="/etc/elasticsearch/elasticsearch.yml"
-        local config_dir="/etc/elasticsearch"
     fi
     
     local network_host=${ELASTICSEARCH_NETWORK_HOST:-127.0.0.1}
 
     echo "Configuring Elasticsearch to listen on $network_host..."
-    grep -q network.host $config_file || echo "network.host: $network_host" >> $config_file
-    grep -q thread_pool.write.queue_size $config_file || echo 'thread_pool.write.queue_size: 2000' >> ${config_dir}/elasticsearch.yml
-
-    echo "-Xms${ELASTICSEARCH_HEAP:-512M}" > ${config_dir}/jvm.options.d/jvm.options
-    echo "-Xmx${ELASTICSEARCH_HEAP:-512M}" >> ${config_dir}/jvm.options.d/jvm.options
+    echo "network.host: $network_host" >> $config_file
+    echo 'thread_pool.write.queue_size: 2000' >> /etc/elasticsearch/elasticsearch.yml
 
     echo "Elasticsearch configuration updated."
 
@@ -61,11 +71,9 @@ configure_elasticsearch() {
 }
 
 install_cassandra() {
-    local version=${CASSANDRA_VERSION:-4.1.8}
+    local version=${CASSANDRA_VERSION:-4.1.7}
     local url=${CASSANDRA_TAR_URL:-http://downloads.apache.org/dist/cassandra/$version/apache-cassandra-$version-bin.tar.gz}
     local install_dir=${CASSANDRA_INSTALL_DIR:-/opt/cassandra}
-
-    [ -f $install_dir/bin/cassandra ] && return
 
     echo "Downloading Apache Cassandra version $version..."
     wget $url -O apache-cassandra-$version-bin.tar.gz
@@ -75,29 +83,6 @@ install_cassandra() {
     tar -xzf apache-cassandra-$version-bin.tar.gz -C $install_dir --strip-components=1
 
     echo "Apache Cassandra $version installed in $install_dir"
-}
-
-create_cassandra_service() {
-    cat > /etc/systemd/system/cassandra.service << EOL
-[Unit]
-Description=Cassandra
-After=network.target
-
-[Service]
-User=cassandra
-Group=cassandra
-ExecStart=${CASSANDRA_INSTALL_DIR}/bin/cassandra -f -p /run/cassandra/cassandra.pid
-StandardOutput=journal
-StandardError=journal
-LimitNOFILE=1000000
-LimitMEMLOCK=infinity
-LimitNPROC=32768
-LimitAS=infinity
-#Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOL
 }
 
 configure_cassandra() {
@@ -110,23 +95,10 @@ configure_cassandra() {
     sed -i "s/^listen_address:.*/listen_address: $listen_address/" $config_file
 
     echo "Setting Cassandra data center to $dc and rack to $rack..."
-    sed -i ${CASSANDRA_INSTALL_DIR}/conf/cassandra-rackdc.properties -e "s/^dc=.*/dc=${dc}/"
-    sed -i ${CASSANDRA_INSTALL_DIR}/conf/cassandra-rackdc.properties -e "s/^rack=.*/rack=${rack}/"
-
-    groupadd cassandra || /bin/true
-    groupadd axonops || /bin/true
-    useradd -m -s /bin/bash -g cassandra -G axonops cassandra || /bin/true
-    useradd -m -s /bin/bash -g axonops -G cassandra axonops || /bin/true
-
-    mkdir -p ${CASSANDRA_INSTALL_DIR}/{data,logs}
-    chown -R cassandra:cassandra ${CASSANDRA_INSTALL_DIR}/{data,logs}
-
-    create_cassandra_service
+    echo "dc: $dc" >> $config_file
+    echo "rack: $rack" >> $config_file
 
     echo "Apache Cassandra configuration updated."
-    systemctl daemon-reload
-    systemctl enable cassandra
-    systemctl restart cassandra
 }
 
 install_axonops_server_local() {
@@ -144,49 +116,12 @@ gpgcheck=0
 EOL
 }
 
-configure_axonops_server() {
-    cat > /etc/axonops/axon-server.yml << EOL
-host: 0.0.0.0 # axon-server endpoint used by the API and the agents
-api_port: 8080 # API port (axon-server <> axon-dash)
-agents_port: 1888 # axon-server <> axon-agents
-elastic_hosts:
-  - http://localhost:9200
-tls:
-  mode: "disabled"
-EOL
-
-    if [[ "${ENABLE_CASSANDRA}" == "true" ]]; then
-        cat >> /etc/axonops/axon-server.yml << EOL
-cql_hosts:
- - localhost:9042
-cql_username: "cassandra"
-cql_password: "cassandra"
-cql_local_dc: "axonops"
-cql_proto_version: 4
-cql_max_searchqueriesparallelism: 100
-cql_batch_size: 100
-cql_page_size: 100
-cql_cache_metrics: true
-cql_autocreate_tables: true
-cql_retrypolicy_numretries: 3
-cql_retrypolicy_min: 1s
-cql_retrypolicy_max: 10s
-cql_reconnectionpolicy_maxretries: 10
-cql_reconnectionpolicy_initialinterval: 1s
-cql_reconnectionpolicy_maxinterval: 10s
-cql_keyspace_replication: "{ 'class': 'NetworkTopologyStrategy', 'axonops': 1 }"
-cql_metrics_cache_max_size: 2048  #MB
-cql_metrics_cache_max_items : 100000
-EOL
-    fi
-}
-
 install_axonops_server_remote() {
     local version=${AXONOPS_SERVER_VERSION:-latest}
     if [ "$version" == "latest" ]; then
-        pkg="axon-server"
+        pkg="axonops-server"
     else
-        pkg="axon-server-${version}"
+        pkg="axonops-server-${version}"
     fi
 
     setup_axonops_repo
@@ -200,9 +135,8 @@ install_axonops_server() {
     else
         install_axonops_server_local
     fi
-    configure_axonops_server
-    systemctl enable axon-server
-    systemctl restart axon-server
+    systemctl enable axonops
+    systemctl start axonops
 }
 
 install_axonops_dash_local() {
@@ -223,30 +157,32 @@ install_axonops_dash_remote() {
 }
 
 install_axonops_dash() {
-    dnf -y install fuse
-
     if [[ "${AXONOPS_DASH_SERVER_RPM}" == "" ]]; then
         install_axonops_dash_remote
     else
         install_axonops_dash_local
     fi
-    
+    dnf -y install fuse
     systemctl enable axon-dash
     systemctl start axon-dash
 }
 
-# Call the function to install Apache Cassandra if enabled
-if [[ "${ENABLE_CASSANDRA}" == "true" ]]; then
-    install_java
-    install_cassandra
-    configure_cassandra
-fi
-
 # Call the function to install Elasticsearch if enabled
 if [[ "${ENABLE_ELASTICSEARCH}" == "true" ]]; then
     install_java
+    ensure_group_exists "elasticsearch"
+    ensure_user_exists "elasticsearch" "elasticsearch"
     install_elasticsearch
     configure_elasticsearch
+fi
+
+# Call the function to install Apache Cassandra if enabled
+if [[ "${ENABLE_CASSANDRA}" == "true" ]]; then
+    install_java
+    ensure_group_exists "cassandra"
+    ensure_user_exists "cassandra" "cassandra"
+    install_cassandra
+    configure_cassandra
 fi
 
 # Call the function to install AxonOps server
