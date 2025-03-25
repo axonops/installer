@@ -7,6 +7,76 @@ install_java() {
     [ "$JAVA_PKG" == "" ] || dnf install -y ${JAVA_PKG}
 }
 
+create_elasticsearch_service() {
+    cat > /etc/systemd/system/elasticsearch.service << EOL
+Unit]
+Description=Elasticsearch
+Documentation=https://www.elastic.co
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+RuntimeDirectory=elasticsearch
+PrivateTmp=true
+Environment=ES_HOME=${ELASTICSEARCH_INSTALL_DIR:-/opt/elasticsearch}
+Environment=ES_PATH_CONF=${ELASTICSEARCH_INSTALL_DIR:-/opt/elasticsearch}/config
+Environment=PID_DIR=/run/elasticsearch
+Environment=ES_SD_NOTIFY=true
+
+WorkingDirectory=${ELASTICSEARCH_INSTALL_DIR:-/opt/elasticsearch}
+
+User=elasticsearch
+Group=elasticsearch
+
+ExecStart=${ELASTICSEARCH_INSTALL_DIR:-/opt/elasticsearch}/bin/elasticsearch -p \${PID_DIR}/elasticsearch.pid --quiet
+
+# StandardOutput is configured to redirect to journalctl since
+# some error messages may be logged in standard output before
+# elasticsearch logging system is initialized. Elasticsearch
+# stores its logs in /var/log/elasticsearch and does not use
+# journalctl by default. If you also want to enable journalctl
+# logging, you can simply remove the "quiet" option from ExecStart.
+StandardOutput=journal
+StandardError=inherit
+
+# Specifies the maximum file descriptor number that can be opened by this process
+LimitNOFILE=65535
+
+# Specifies the maximum number of processes
+LimitNPROC=4096
+
+# Specifies the maximum size of virtual memory
+LimitAS=infinity
+
+# Specifies the maximum file size
+LimitFSIZE=infinity
+
+# Disable timeout logic and wait until process is stopped
+TimeoutStopSec=0
+
+# SIGTERM signal is used to stop the Java process
+KillSignal=SIGTERM
+
+# Send the signal only to the JVM rather than its control group
+KillMode=process
+
+# Java process is never killed
+SendSIGKILL=no
+
+# When a JVM receives a SIGTERM signal it exits with code 143
+SuccessExitStatus=143
+
+# Allow a slow startup before the systemd notifier module kicks in to extend the timeout
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
+EOL
+    systemctl daemon-reload
+    systemctl enable elasticsearch
+}
+
 install_elasticsearch_tar() {
     local version=${ELASTICSEARCH_VERSION:-7.17.16}
     local url=${ELASTICSEARCH_TAR}
@@ -20,6 +90,16 @@ install_elasticsearch_tar() {
 
     mkdir -p $install_dir
     tar -xzf elasticsearch-$version.tar.gz -C $install_dir --strip-components=1
+
+    groupadd elasticsearch || /bin/true
+    useradd -m -s /bin/bash -g elasticsearch elasticsearch || /bin/true
+    # Fix permissions
+    find $install_dir -type d -exec chmod 755 {} \;
+    find $install_dir/config -type f -exec chmod 644 {} \;
+
+    mkdir -p $install_dir/data
+    chown -R elasticsearch:elasticsearch $install_dir/logs $install_dir/config $install_dir/data
+    create_elasticsearch_service
 
     echo "Elasticsearch $version installed in $install_dir"
 }
@@ -147,11 +227,11 @@ EOL
 
 configure_axonops_server() {
     cat > /etc/axonops/axon-server.yml << EOL
-host: 0.0.0.0 # axon-server endpoint used by the API and the agents
-api_port: 8080 # API port (axon-server <> axon-dash)
-agents_port: 1888 # axon-server <> axon-agents
+host: 0.0.0.0
+api_port: 8080
+agents_port: 1888
 elastic_hosts:
-  - http://localhost:9200
+  - ${AXONOPS_ELASTICSEARCH_URL:-http://localhost:9200}
 tls:
   mode: "disabled"
 EOL
@@ -159,8 +239,9 @@ EOL
     if [[ "${ENABLE_CASSANDRA}" == "true" ]]; then
         cat >> /etc/axonops/axon-server.yml << EOL
 cql_hosts:
- - localhost:9042
-cql_username: "cassandra"
+ - ${AXONOPS_CQL_HOST:-localhost:9042}
+cql_username: "${AXONOPS_CQL_USERNAME:-cassandra}"
+cql_password: "${AXONOPS_CQL_PASSWORD:-cassandra}"
 cql_password: "cassandra"
 cql_local_dc: "axonops"
 cql_proto_version: 4

@@ -18,6 +18,13 @@ This repository contains scripts to install and configure AxonOps, Elasticsearch
 
 Before running the installer scripts, configure the environment variables in [./config.env](./config.env).
 
+The AxonOps server requires at least a Elasticsearch server to store configurations and metrics. For clusters
+bigger than 6 nodes, it is recommended to store the AxonOps metrics into Cassandra. This can be a single node.
+Only the large deployments will require a Cassandra cluster for metrics.
+
+Both are enabled by default on this script. The [./config.env](./config.env) contains the configuration options
+to enable or disable them.
+
 ## Installation
 
 ### Install AxonOps Server and Dashboard

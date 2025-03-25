@@ -72,7 +72,6 @@ axon-agent:
     org: "${AXONOPS_AGENT_ORG:-example}"
     tls:
       mode: "disabled" # disabled, TLS, mTLS
-
 NTP:
     host: "pool.ntp.org" # Specify your NTP server IP address or hostname
     timeout: 6
