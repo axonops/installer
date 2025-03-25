@@ -231,7 +231,12 @@ install_axonops_dash() {
     else
         install_axonops_dash_local
     fi
-    
+    cat > /etc/systemd/system/axon-dash.service.d/override.conf << EOL
+[Service]
+ExecStart=
+ExecStart=/usr/share/axonops/axon-dash --appimage-extract-and-run
+EOL
+    systemctl daemon-reload
     systemctl enable axon-dash
     systemctl start axon-dash
 }

@@ -8,6 +8,12 @@ This repository contains scripts to install and configure AxonOps, Elasticsearch
 - `dnf` package manager
 - Internet connection to download packages or local yum mirrors
 
+## Pre-Installed software
+
+- git
+- wget
+- tar
+
 ## Configuration
 
 Before running the installer scripts, configure the environment variables in [./config.env](./config.env).
