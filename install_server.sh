@@ -112,6 +112,7 @@ configure_cassandra() {
     echo "Setting Cassandra data center to $dc and rack to $rack..."
     sed -i ${CASSANDRA_INSTALL_DIR}/conf/cassandra-rackdc.properties -e "s/^dc=.*/dc=${dc}/"
     sed -i ${CASSANDRA_INSTALL_DIR}/conf/cassandra-rackdc.properties -e "s/^rack=.*/rack=${rack}/"
+    sed -i ${CASSANDRA_INSTALL_DIR}/conf/cassandra.yaml -e "s/^endpoint_snitch: SimpleSnitch/endpoint_snitch: GossipingPropertyFileSnitch/"
 
     groupadd cassandra || /bin/true
     groupadd axonops || /bin/true

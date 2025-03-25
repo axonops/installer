@@ -66,10 +66,10 @@ configure_axonops_agent() {
     cat > /etc/axonops/axon-agent.yml << EOL
 axon-server:
     hosts: ${AXONOPS_SERVER_IP:-localhost}
-    port: 1888
+    port: ${AXONOPS_SERVER_PORT:-1888}
 
 axon-agent:
-    org: "example"
+    org: "${AXONOPS_AGENT_ORG:-example}"
     tls:
       mode: "disabled" # disabled, TLS, mTLS
 
