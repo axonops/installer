@@ -14,7 +14,15 @@ gpgcheck=0
 EOL
 }
 
-install_axonops_agent() {
+install_axonops_agent_rpm() {
+    rpm -Uvh ${AXONOPS_AGENT_RPM}
+}
+
+install_axonops_java_agent_rpm() {
+    rpm -Uvh ${AXONOPS_AGENT_CASSANDRA_PKG}
+}
+
+install_axonops_agent_yum() {
     local version=${AXONOPS_AGENT_VERSION:-latest}
     if [ "$version" == "latest" ]; then
         pkg="axon-agent"
@@ -27,7 +35,7 @@ install_axonops_agent() {
     dnf install -y $pkg
 }
 
-install_axonops_java_agent() {
+install_axonops_java_agent_yum() {
     local version=${AXONOPS_AGENT_CASSANDRA_PKG_VERSION:-latest}
     if [ "$version" == "latest" ]; then
         pkg="${AXONOPS_AGENT_CASSANDRA_PKG}"
@@ -36,6 +44,22 @@ install_axonops_java_agent() {
     fi
 
     dnf install -y $pkg
+}
+
+install_axonops_agent() {
+    if [[ "${AXONOPS_AGENT_RPM}" == "" ]]; then
+        install_axonops_agent_yum
+    else
+        install_axonops_agent_rpm
+    fi
+}
+
+install_axonops_java_agent() {
+    if [[ "${AXONOPS_AGENT_CASSANDRA_RPM}" == "" ]]; then
+        install_axonops_java_agent_yum
+    else
+        install_axonops_java_agent_rpm
+    fi
 }
 
 configure_axonops_agent() {
